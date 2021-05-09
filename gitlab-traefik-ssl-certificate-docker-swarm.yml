@@ -1,0 +1,212 @@
+# GitLab with SSL Certificate in a Docker Swarm
+
+# Vladimir Mikhalev
+# callvaldemar@gmail.com
+# www.heyvaldemar.com
+
+# Configure Traefik and create secrets for storing the passwords on the Docker Swarm manager node before applying the configuration.
+# Traefik configuration: https://github.com/heyValdemar/traefik-ssl-certificate-docker-swarm
+
+# Create a secret for storing the password for GitLab administrator using the command:
+# printf "YourPassword" | docker secret create gitlab-application-password -
+
+# Create a secret for storing the token for GitLab Runner using the command:
+# printf "YourToken" | docker secret create gitlab-runnner-token -
+
+# Clear passwords from bash history using the command:
+# history -c && history -w
+
+# Create a secret for storing the GitLab configuration using the command:
+# docker secret create gitlab.rb /path/to/gitlab.rb
+
+# Run gitlab-restore-application-data.sh on the Docker Swarm worker node where the container for backups is running to restore application data if needed.
+# Run docker stack ps gitlab | grep gitlab_backup | awk 'NR > 0 {print $4}' on the Docker Swarm manager node to find on which node container for backups is running.
+
+# Deploy GitLab in a Docker Swarm using the command:
+# docker stack deploy -c gitlab-traefik-ssl-certificate-docker-swarm.yml gitlab
+
+# Register the GitLab Runner on the Docker Swarm worker node using the command:
+# GITLAB_RUNNER_CONTAINER_1=$(docker ps -aqf "name=gitlab-runner") \
+# && docker container exec -it $GITLAB_RUNNER_CONTAINER_1 sh -c 'REGISTRATION_TOKEN="$(cat /run/secrets/gitlab-runnner-token)" \
+# && gitlab-runner register \
+# --non-interactive \
+# --url "https://gitlab.heyvaldemar.net/" \
+# --registration-token "$REGISTRATION_TOKEN" \
+# --executor "docker" \
+# --docker-image docker:19.03 \
+# --description "docker-runner-1" \
+# --tag-list "docker" \
+# --run-untagged="true" \
+# --locked="false" \
+# --docker-privileged \
+# --docker-cert-path /etc/gitlab-runner \
+# --tls-ca-file "/etc/docker-runner/certs/gitlab.heyvaldemar.net.crt" \
+# --docker-volumes "/certs/client" \
+# --output-limit "50000000" \
+# --access-level="not_protected"'
+
+# Run docker stack ps gitlab | grep gitlab_gitlab-runner | awk 'NR > 0 {print $4}' on the Docker Swarm manager node to find on which node container for GitLab Runner is running.
+
+# Login to the Container Registry using GitLab credentials:
+# docker login registry.heyvaldemar.net
+
+version: '3.8'
+
+x-default-opts:
+  &default-opts
+  logging:
+    options:
+      max-size: "10m"
+
+networks:
+  gitlab-network:
+    driver: overlay
+  traefik-network:
+    external: true
+
+volumes:
+  gitlab-data:
+  gitlab-logs:
+  gitlab-config:
+  gitlab-runner-config:
+  gitlab-data-backups:
+
+secrets:
+  gitlab-application-password:
+    external: true
+  gitlab.rb:
+    external: true
+  gitlab-runnner-token:
+    external: true
+  wildcard-heyvaldemar-net.crt:
+    external: true
+
+services:
+  gitlab:
+    <<: *default-opts
+    # Image tag (replace with yours)
+    image: gitlab/gitlab-ee:13.11.3-ee.0
+    volumes:
+      - gitlab-data:/var/opt/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-config:/etc/gitlab
+    environment:
+      GITLAB_OMNIBUS_CONFIG: "from_file('/omnibus-config.rb')"
+    networks:
+      - gitlab-network
+      - traefik-network
+    ports:
+      - "2222:22"
+    secrets:
+      - source: gitlab.rb
+        target: /omnibus-config.rb
+      - source: gitlab-application-password
+      - source: gitlab-runnner-token
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      update_config:
+        delay: 15s
+        parallelism: 1
+        monitor: 10s
+        failure_action: rollback
+        max_failure_ratio: 0.55
+      # Container resources (replace with yours)
+      resources:
+        limits:
+          cpus: '2.35'
+          memory: 4G
+        reservations:
+          cpus: '0.55'
+          memory: 2G
+      labels:
+        - "traefik.enable=true"
+        # GitLab URL (replace with yours)
+        - "traefik.http.routers.gitlab.rule=Host(`gitlab.heyvaldemar.net`)"
+        - "traefik.http.routers.gitlab.service=gitlab"
+        - "traefik.http.routers.gitlab.entrypoints=websecure"
+        - "traefik.http.services.gitlab.loadbalancer.server.port=80"
+        - "traefik.http.routers.gitlab.tls=true"
+        - "traefik.http.services.gitlab.loadbalancer.passhostheader=true"
+        - "traefik.http.routers.gitlab.middlewares=compresstraefik"
+        - "traefik.http.middlewares.compresstraefik.compress=true"
+        # GitLab Registry URL (replace with yours)
+        - "traefik.http.routers.gitlab-registry.rule=Host(`registry.heyvaldemar.net`)"
+        - "traefik.http.routers.gitlab-registry.service=gitlab-registry"
+        - "traefik.http.routers.gitlab-registry.entrypoints=websecure"
+        - "traefik.http.services.gitlab-registry.loadbalancer.server.port=5000"
+        - "traefik.http.services.gitlab-registry.loadbalancer.passhostheader=true"
+        - "traefik.http.routers.gitlab-registry.middlewares=compresstraefik"
+        - "traefik.http.middlewares.compresstraefik.compress=true"
+
+  gitlab-runner:
+    <<: *default-opts
+    # Image tag (replace with yours)
+    image: gitlab/gitlab-runner:ubuntu-v13.11.0
+    volumes:
+      - gitlab-runner-config:/etc/gitlab-runner
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - gitlab-network
+    secrets:
+      - source: wildcard-heyvaldemar-net.crt
+        # GitLab URL (replace with yours)
+        target: /etc/gitlab-runner/certs/gitlab.heyvaldemar.net.crt
+      - source: gitlab-runnner-token
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      # Container resources (replace with yours)
+      resources:
+        limits:
+          cpus: '2.35'
+          memory: 2G
+        reservations:
+          cpus: '1.25'
+          memory: 1G
+    depends_on:
+      - gitlab
+
+  backups:
+    <<: *default-opts
+    # Image tag (replace with yours)
+    image: ubuntu:20.04
+    # Application data backups prune interval (replace with yours). Default is 7 days.
+    # find /srv/gitlab-application-data/backups -type f -mtime +7 | xargs rm -f
+
+    # GitLab backups interval (replace with yours). Default is 24 hours.
+    # sleep 24h
+
+    # Run gitlab-restore-application-data.sh on the Docker Swarm worker node where the container for backups is running to restore application data if needed.
+    # Run docker stack ps gitlab | grep gitlab_backup | awk 'NR > 0 {print $4}' on the Docker Swarm manager node to find on which node container for backups is running.
+    command: sh -c 'sleep 30m
+             && while true; do
+             tar -zcpf /srv/gitlab-application-data/backups/gitlab-application-data-backup-$$(date "+%Y-%m-%d_%H-%M").tar.gz /var/opt/gitlab
+             && find /srv/gitlab-application-data/backups -type f -mtime +7 | xargs rm -f;
+             sleep 24h; done'
+    volumes:
+      - gitlab-data:/var/opt/gitlab
+      # Application data backups location
+      - gitlab-data-backups:/srv/gitlab-application-data/backups
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == worker
+      # Container resources (replace with yours)
+      resources:
+        limits:
+          cpus: '0.35'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    depends_on:
+      - gitlab
