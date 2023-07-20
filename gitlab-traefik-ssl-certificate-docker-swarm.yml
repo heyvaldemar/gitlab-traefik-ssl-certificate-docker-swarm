@@ -9,8 +9,8 @@
 # Follow me on Instagram: https://www.instagram.com/heyvaldemar/
 # Follow me on Facebook: https://www.facebook.com/heyValdemarFB/
 # Follow me on TikTok: https://www.tiktok.com/@heyvaldemar
-# Follow me on [LinkedIn](https://www.linkedin.com/in/heyvaldemar/)
-# Follow me on [GitHub](https://github.com/heyvaldemar)
+# Follow me on LinkedIn: https://www.linkedin.com/in/heyvaldemar/
+# Follow me on GitHub: https://github.com/heyvaldemar
 
 # Communication
 # Chat with IT pros on Discord: https://discord.gg/AJQGCCBcqf
@@ -56,7 +56,7 @@
 # --executor "docker" \
 # --docker-image docker:19.03 \
 # --description "docker-runner-1" \
-# --tag-list "docker" \
+# --tag-list "docker,linux" \
 # --run-untagged="true" \
 # --locked="false" \
 # --docker-privileged \
