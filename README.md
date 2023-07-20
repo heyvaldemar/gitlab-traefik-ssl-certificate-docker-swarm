@@ -42,7 +42,7 @@ GITLAB_RUNNER_CONTAINER_1=$(docker ps -aqf "name=gitlab-runner") \
 --executor "docker" \
 --docker-image docker:19.03 \
 --description "docker-runner-1" \
---tag-list "docker" \
+--tag-list "docker,linux" \
 --run-untagged="true" \
 --locked="false" \
 --docker-privileged \
